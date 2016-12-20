@@ -46,14 +46,14 @@ namespace BlockchainProofProofOfConcept
 			#region TxFee
 			// Get and calculate fee					
 			WriteLine("Calculating dynamic transaction fee...");
-			Money feePerBytes = null;
+			Money satoshiFeePerBytes = null;
 			try
 			{
-				feePerBytes = QueryFeePerBytes();
+				satoshiFeePerBytes = QueryFeePerBytes();
 			}
 			catch
 			{
-				feePerBytes = new Money(0.001m, MoneyUnit.BTC);
+				satoshiFeePerBytes = new Money(100, MoneyUnit.Satoshi);
 			}
 
 			int inNum = 1; // send from 1 address
@@ -63,7 +63,7 @@ namespace BlockchainProofProofOfConcept
 			// Here is how you estimate the fee: http://bitcoin.stackexchange.com/questions/1195/how-to-calculate-transaction-size-before-sending
 			int estimatedTxSize = inNum * 148 + outNum * 34 + 10 + inNum + maxOpRetOutSize;
 			WriteLine($"Estimated tx size: {estimatedTxSize} bytes");
-			Money fee = feePerBytes * estimatedTxSize;
+			Money fee = satoshiFeePerBytes * estimatedTxSize;
 			WriteLine($"Fee: {fee.ToDecimal(MoneyUnit.BTC).ToString("0.#############################")}btc");
 			#endregion
 
