@@ -21,9 +21,12 @@ namespace BlockchainProofProofOfConcept
 			//WriteLine(key.GetBitcoinSecret(Network.TestNet).GetAddress()); //mzaU8irz8cjxHz6vUUL2Fyfm5rZ5zKwDY9
 
 			var secret = new BitcoinSecret("cNCFWet2AdJv7zK6ThwLWJhQSR8MiVYvyr5SpV166c9f6S5pLD1P");
-			var bytes = Encoding.UTF8.GetBytes("I am a hash of a file2");
-			var txid = MakePayment(secret.ToWif(), bytes);
-			WriteLine(txid);
+			var bytes = Encoding.UTF8.GetBytes("foo");
+			for (int i = 0; i < 100; i++)
+			{
+				var txid = MakePayment(secret.ToWif(), bytes);
+				WriteLine($"TxId: {txid}");
+			}
 
 			WriteLine("Press key to exit...");
 			ReadKey();
@@ -41,40 +44,41 @@ namespace BlockchainProofProofOfConcept
 			var changeScriptPubKey = secret.ScriptPubKey;
 
 			#region TxFee
-			// 4. Get the fee
-			WriteLine("Calculating transaction fee...");
-			Money fee;
+			// Get and calculate fee					
+			WriteLine("Calculating dynamic transaction fee...");
+			Money feePerBytes = null;
 			try
 			{
-				var txSizeInBytes = 250; // todo this number should be littel above the expected size of the transaction
-				using (var client = new HttpClient())
-				{
-					const string request = @"https://bitcoinfees.21.co/api/v1/fees/recommended";
-					var result = client.GetAsync(request, HttpCompletionOption.ResponseContentRead).Result;
-					var json = JObject.Parse(result.Content.ReadAsStringAsync().Result);
-					var fastestSatoshiPerByteFee = json.Value<decimal>("hourFee");
-					fee = new Money(fastestSatoshiPerByteFee * txSizeInBytes, MoneyUnit.Satoshi);
-				}
+				feePerBytes = QueryFeePerBytes();
 			}
 			catch
 			{
-				throw new Exception("Couldn't calculate transaction fee, try it again later.");
+				feePerBytes = new Money(0.001m, MoneyUnit.BTC);
 			}
+
+			int inNum = 1; // send from 1 address
+			int outNum = 1; // send back to the same 1 address
+			int maxOpRetOutSize = 80; // max size of OP_RETURN output is 80 byte
+
+			// Here is how you estimate the fee: http://bitcoin.stackexchange.com/questions/1195/how-to-calculate-transaction-size-before-sending
+			int estimatedTxSize = inNum * 148 + outNum * 34 + 10 + inNum + maxOpRetOutSize;
+			WriteLine($"Estimated tx size: {estimatedTxSize} bytes");
+			Money fee = feePerBytes * estimatedTxSize;
 			WriteLine($"Fee: {fee.ToDecimal(MoneyUnit.BTC).ToString("0.#############################")}btc");
 			#endregion
 
 			//sidenote: I guess you need to deal with the dust limit, too, the testnet doesnt care
 			//something like checking how much money have been sent to the changeScriptPubKey
 			//somehow like this:
-			var dustLimit= new Money(0.001m, MoneyUnit.BTC);
+			var dustLimit = new Money(0.001m, MoneyUnit.BTC);
 			var minimumNeededAmount = fee + dustLimit;
 
 			#region FindCoinsToSpen
-			// 3. Gather coins can be spend
+			// Gather coins can be spend
 			WriteLine("Gathering unspent coins...");
 			Dictionary<Coin, bool> unspentCoins = GetUnspentCoins(secret);
 
-			// 8. Select coins
+			// Select coins
 			WriteLine("Selecting coins...");
 			var coinsToSpend = new HashSet<Coin>();
 			var unspentConfirmedCoins = new List<Coin>();
@@ -95,15 +99,15 @@ namespace BlockchainProofProofOfConcept
 			var scriptPubKey = TxNullDataTemplate.Instance.GenerateScriptPubKey(data);
 			#endregion			
 
-			// 10. Build the transaction
+			// Build the transaction
 			WriteLine("Signing transaction...");
 			var builder = new TransactionBuilder();
 			var tx = builder
 				.AddCoins(coinsToSpend)
 				.AddKeys(secret)
 				.Send(scriptPubKey, Money.Zero)
-				.SetChange(changeScriptPubKey)
-				.SendFees(fee)				
+				.SetChange(changeScriptPubKey)	
+				.SendFees(fee)
 				.BuildTransaction(true);
 
 			#region Broadcast
@@ -149,6 +153,35 @@ namespace BlockchainProofProofOfConcept
 			#endregion
 
 			return tx.GetHash().ToString(); // txid
+		}
+
+		private static Money QueryFeePerBytes()
+		{
+			try
+			{
+
+				using (var client = new HttpClient())
+				{
+					const string request = @"https://api.blockcypher.com/v1/btc/main";
+					var result = client.GetAsync(request, HttpCompletionOption.ResponseContentRead).Result;
+
+					var json = JObject.Parse(result.Content.ReadAsStringAsync().Result);
+					var slowest = (int)(json.Value<decimal>("low_fee_per_kb") / 1024);
+					return new Money(slowest, MoneyUnit.Satoshi);
+				}			
+			}
+			catch
+			{
+				using (var client = new HttpClient())
+				{
+					const string request = @"https://bitcoinfees.21.co/api/v1/fees/recommended";
+					var result = client.GetAsync(request, HttpCompletionOption.ResponseContentRead).Result;
+
+					var json = JObject.Parse(result.Content.ReadAsStringAsync().Result);
+					var slowest = json.Value<decimal>("hourFee");
+					return new Money(slowest, MoneyUnit.Satoshi);
+				}
+			}
 		}
 
 		/// <summary>
